@@ -84,40 +84,37 @@ function selectBlock(i){
 
 load(40,'Building world...');
 
-// Minecraft-style chunks: 16x16x4
 const CHUNK_SIZE=16;
-const WORLD_HEIGHT=4;
+const WORLD_HEIGHT=10;
 const RENDER_DIST=3;
-
 const blockMap=new Map();
 const chunkMeshes=new Map();
 
 function blockKey(x,y,z){return x+','+y+','+z}
 function chunkKey(cx,cz){return cx+','+cz}
+function getChunkCoords(x,z){return {cx:Math.floor(x/CHUNK_SIZE),cz:Math.floor(z/CHUNK_SIZE)}}
 
-function getChunkCoords(x,z){
- return {cx:Math.floor(x/CHUNK_SIZE),cz:Math.floor(z/CHUNK_SIZE)};
-}
-
-// Generate initial flat world
-for(let cx=-RENDER_DIST;cx<=RENDER_DIST;cx++){
- for(let cz=-RENDER_DIST;cz<=RENDER_DIST;cz++){
-  for(let x=0;x<CHUNK_SIZE;x++){
-   for(let z=0;z<CHUNK_SIZE;z++){
-    const wx=cx*CHUNK_SIZE+x;
-    const wz=cz*CHUNK_SIZE+z;
-    blockMap.set(blockKey(wx,0,wz),2); // stone
-    blockMap.set(blockKey(wx,1,wz),1); // dirt
-    blockMap.set(blockKey(wx,2,wz),1); // dirt
-    blockMap.set(blockKey(wx,3,wz),0); // grass
+function addGroundChunk(cx,cz){
+ for(let x=0;x<CHUNK_SIZE;x++){
+  for(let z=0;z<CHUNK_SIZE;z++){
+   const wx=cx*CHUNK_SIZE+x;
+   const wz=cz*CHUNK_SIZE+z;
+   for(let y=0;y<4;y++){
+    const type = y===3 ? 0 : 1; // grass, dirt
+    blockMap.set(blockKey(wx,y,wz), type);
    }
   }
  }
 }
 
+for(let cx=-RENDER_DIST;cx<=RENDER_DIST;cx++){
+ for(let cz=-RENDER_DIST;cz<=RENDER_DIST;cz++){
+  addGroundChunk(cx,cz);
+ }
+}
+
 const boxGeo=new THREE.BoxGeometry(1,1,1);
 const matCache=new Map();
-
 function getMat(color){
  if(!matCache.has(color)) matCache.set(color,new THREE.MeshLambertMaterial({color,flatShading:true}));
  return matCache.get(color);
@@ -135,8 +132,6 @@ function buildChunkMesh(cx,cz){
     const type=blockMap.get(k);
     const m=new THREE.Mesh(boxGeo,getMat(blockTypes[type].color));
     m.position.set(wx+0.5,y+0.5,wz+0.5);
-    m.castShadow=true;
-    m.receiveShadow=true;
     meshes.push(m);
    }
   }
@@ -147,7 +142,7 @@ function buildChunkMesh(cx,cz){
 function rebuildChunk(cx,cz){
  const ck=chunkKey(cx,cz);
  if(chunkMeshes.has(ck)){
-  chunkMeshes.get(ck).forEach(m=>{scene.remove(m); if(m.geometry) m.geometry.dispose();});
+  chunkMeshes.get(ck).forEach(m=>{scene.remove(m);});
  }
  const meshes=buildChunkMesh(cx,cz);
  meshes.forEach(m=>scene.add(m));
@@ -162,20 +157,18 @@ function loadChunksAround(px,pz){
    toLoad.add(chunkKey(x,z));
   }
  }
- const toUnload=[];
- for(const ck of chunkMeshes.keys()){
-  if(!toLoad.has(ck)) toUnload.push(ck);
- }
- toUnload.forEach(ck=>{
-  chunkMeshes.get(ck).forEach(m=>{scene.remove(m); if(m.geometry) m.geometry.dispose();});
-  chunkMeshes.delete(ck);
- });
- toLoad.forEach(ck=>{
-  if(!chunkMeshes.has(ck)){
-   const [cx,cz]=ck.split(',').map(Number);
-   rebuildChunk(cx,cz);
+ for(const ck of [...chunkMeshes.keys()]){
+  if(!toLoad.has(ck)){
+   chunkMeshes.get(ck).forEach(m=>scene.remove(m));
+   chunkMeshes.delete(ck);
   }
- });
+ }
+ for(const ck of toLoad){
+  if(!chunkMeshes.has(ck)){
+   const [cxn,czn]=ck.split(',').map(Number);
+   rebuildChunk(cxn,czn);
+  }
+ }
 }
 
 load(50,'Setting up input...');
@@ -208,41 +201,52 @@ canvas.addEventListener('click',()=>{
 
 canvas.addEventListener('mousedown',e=>{
  if(document.pointerLockElement!==canvas) return;
- 
- const forward=Math.sin(yaw);
- const right=Math.cos(yaw);
- const up=Math.sin(pitch);
- const fwd=Math.cos(pitch);
 
- // Cast a ray 5 blocks forward
- let bx=player.x,by=player.y+1.6,bz=player.z;
- let hit=false;
- for(let i=0;i<10;i++){
-  bx+=forward*fwd*0.5;
-  by+=up*0.5;
-  bz+=Math.cos(yaw)*fwd*0.5;
-  
-  const k=blockKey(Math.round(bx),Math.round(by),Math.round(bz));
-  if(blockMap.has(k)){
-   if(e.shiftKey) blockMap.delete(k);
-   else blockMap.set(k,selectedBlock);
-   
-   const {cx,cz}=getChunkCoords(Math.round(bx),Math.round(bz));
-   rebuildChunk(cx,cz);
-   hit=true;
+ const h = 1.6;
+ const dir = new THREE.Vector3(Math.sin(yaw), Math.sin(pitch), Math.cos(yaw));
+ 
+ // Raycast through world in front of camera
+ let bx=Math.round(player.x), by=Math.round(player.y+h), bz=Math.round(player.z);
+ let hitBlock=null;
+ let hitNormal=null;
+
+ for(let i=0;i<20;i++){
+  bx = Math.round(player.x + dir.x * i * 0.5);
+  by = Math.round(player.y + h + dir.y * i * 0.5);
+  bz = Math.round(player.z + dir.z * i * 0.5);
+  const key = blockKey(bx,by,bz);
+  if(blockMap.has(key)){
+   hitBlock={x:bx,y:by,z:bz};
+   // find side normal based on previous step
+   const px = Math.round(player.x + dir.x * (i-1) * 0.5);
+   const py = Math.round(player.y + h + dir.y * (i-1) * 0.5);
+   const pz = Math.round(player.z + dir.z * (i-1) * 0.5);
+   hitNormal={x:bx-px,y:by-py,z:bz-pz};
    break;
   }
  }
- 
- if(!hit){
-  // Place in front if nothing hit
-  bx=Math.round(player.x+forward*fwd*5);
-  by=Math.round(player.y+1.6+up*5);
-  bz=Math.round(player.z+Math.cos(yaw)*fwd*5);
-  blockMap.set(blockKey(bx,by,bz),selectedBlock);
-  const {cx,cz}=getChunkCoords(bx,bz);
+
+ if(hitBlock){
+  if(e.shiftKey){
+   blockMap.delete(blockKey(hitBlock.x,hitBlock.y,hitBlock.z));
+  } else {
+   const bx2 = hitBlock.x - hitNormal.x;
+   const by2 = hitBlock.y - hitNormal.y;
+   const bz2 = hitBlock.z - hitNormal.z;
+   blockMap.set(blockKey(bx2,by2,bz2),selectedBlock);
+  }
+  const {cx,cz}=getChunkCoords(hitBlock.x,hitBlock.z);
   rebuildChunk(cx,cz);
+  return;
  }
+
+ // Fallback placement in front of camera
+ const px=Math.round(player.x + dir.x * 3);
+ const py=Math.round(player.y + h + dir.y * 3);
+ const pz=Math.round(player.z + dir.z * 3);
+ blockMap.set(blockKey(px,py,pz),selectedBlock);
+ const {cx,cz}=getChunkCoords(px,pz);
+ rebuildChunk(cx,cz);
 });
 
 load(70,'Rendering world...');
@@ -259,27 +263,24 @@ function animate(){
  frameCount++;
  if(now-lastTime>1000){fps=frameCount;frameCount=0;lastTime=now;$('fps').textContent=fps;$('chunks').textContent=chunkMeshes.size;}
 
- // Movement
+ // Movement using camera direction + corrected axes
  const forward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
  const right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
  
- if(keys['w']||keys['arrowup']){player.x+=forward.x*0.2;player.z+=forward.z*0.2;}
- if(keys['s']||keys['arrowdown']){player.x-=forward.x*0.2;player.z-=forward.z*0.2;}
- if(keys['a']||keys['arrowleft']){player.x-=right.x*0.2;player.z-=right.z*0.2;}
- if(keys['d']||keys['arrowright']){player.x+=right.x*0.2;player.z+=right.z*0.2;}
+ if(keys['w']||keys['arrowup']){player.x += forward.x * 0.22; player.z += forward.z * 0.22;}
+ if(keys['s']||keys['arrowdown']){player.x -= forward.x * 0.22; player.z -= forward.z * 0.22;}
+ if(keys['a']||keys['arrowleft']){player.x -= right.x * 0.22; player.z -= right.z * 0.22;}
+ if(keys['d']||keys['arrowright']){player.x += right.x * 0.22; player.z += right.z * 0.22;}
 
- // Gravity
- player.vy-=0.02;
- player.y+=player.vy;
+ player.vy -= 0.022;
+ player.y += player.vy;
  if(player.y<4){player.y=4;player.vy=0;player.jumping=false;}
 
- // Update camera
  camera.position.set(player.x,player.y+1.6,player.z);
  camera.rotation.order='YXZ';
  camera.rotation.y=yaw;
  camera.rotation.x=pitch;
 
- // Load/unload chunks based on position
  const {cx,cz}=getChunkCoords(player.x,player.z);
  if(cx!==lastChunkCx||cz!==lastChunkCz){
   lastChunkCx=cx;lastChunkCz=cz;
