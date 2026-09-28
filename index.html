@@ -148,7 +148,6 @@
 
     <div id="hud">
         <div>FPS: <span id="fps">0</span></div>
-        <div>Chunks Loaded: <span id="chunksLoaded">0</span></div>
         <div>Blocks Rendered: <span id="blocksRendered">0</span></div>
         <div>Position: X:<span id="posX">0</span> Y:<span id="posY">0</span> Z:<span id="posZ">0</span></div>
     </div>
@@ -165,6 +164,7 @@
         <div class="inventory-slot">Coal</div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
         // ===== LOADING SCREEN =====
         let loadingProgress = 0;
@@ -175,66 +175,67 @@
             document.getElementById('loadingText').textContent = text;
         }
 
-        // ===== CANVAS SETUP =====
+        updateLoading(10, 'Setting up Three.js...');
+
+        // ===== THREE.JS SETUP =====
         const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 200, 500);
 
-        updateLoading(10, 'Setting up canvas...');
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 32, 0);
 
-        // ===== 3D ENGINE =====
-        const game = {
-            camera: {
-                x: 0,
-                y: 30,
-                z: 0,
-                rotX: 0,
-                rotY: 0,
-                fov: 60,
-                speed: 0.5,
-                jumpVel: 0,
-                isJumping: false
-            },
-            blocks: {},
-            chunkSize: 16,
-            renderDistance: 3,
-            time: 0,
-            frameCount: 0,
-            lastTime: Date.now(),
-            fps: 0
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+
+        updateLoading(25, 'Creating lighting...');
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(100, 100, 100);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        scene.add(directionalLight);
+
+        updateLoading(40, 'Generating world...');
+
+        // ===== BLOCK SYSTEM =====
+        const blockSize = 1;
+        const chunkSize = 16;
+        const worldHeight = 4;
+        const chunks = {};
+        const chunkMeshes = {};
+        const renderDistance = 5;
+
+        const blockMaterials = {
+            grass_top: new THREE.MeshLambertMaterial({ color: 0x2D5016 }),
+            grass_side: new THREE.MeshLambertMaterial({ color: 0x3a6b1f }),
+            dirt: new THREE.MeshLambertMaterial({ color: 0x8B7355 }),
+            stone: new THREE.MeshLambertMaterial({ color: 0x808080 }),
+            sand: new THREE.MeshLambertMaterial({ color: 0xF4A460 })
         };
 
-        // ===== BLOCK COLORS (SIMPLE 3D) =====
-        const blockColors = {
-            grass_top: '#2D5016',
-            grass_side: '#3a6b1f',
-            dirt: '#8B7355',
-            stone: '#808080',
-            stone_dark: '#696969',
-            sand: '#F4A460',
-            sand_dark: '#d4944a'
-        };
-
-        updateLoading(25, 'Initializing chunk system...');
-
-        // ===== CHUNK GENERATION =====
         function getChunkKey(cx, cz) {
             return `${cx},${cz}`;
         }
 
         function generateChunk(cx, cz) {
             const blocks = [];
-            const startX = cx * game.chunkSize;
-            const startZ = cz * game.chunkSize;
+            const startX = cx * chunkSize;
+            const startZ = cz * chunkSize;
 
-            // Create 4 layers of blocks
-            for (let y = 0; y < 4; y++) {
-                for (let x = 0; x < game.chunkSize; x++) {
-                    for (let z = 0; z < game.chunkSize; z++) {
+            for (let y = 0; y < worldHeight; y++) {
+                for (let x = 0; x < chunkSize; x++) {
+                    for (let z = 0; z < chunkSize; z++) {
                         let blockType = 'dirt';
+                        if (y === worldHeight - 1) blockType = 'grass_top';
                         if (y === 0) blockType = 'stone';
-                        else if (y === 3) blockType = 'grass_top';
 
                         blocks.push({
                             x: startX + x,
@@ -246,132 +247,140 @@
                 }
             }
 
-            game.blocks[getChunkKey(cx, cz)] = blocks;
+            return blocks;
         }
 
-        updateLoading(40, 'Generating world chunks...');
+        function createChunkMesh(cx, cz) {
+            const key = getChunkKey(cx, cz);
+            
+            if (!chunks[key]) {
+                chunks[key] = generateChunk(cx, cz);
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            const normals = [];
+            const colors = [];
+
+            const blocks = chunks[key];
+
+            for (let block of blocks) {
+                const x = block.x;
+                const y = block.y;
+                const z = block.z;
+
+                // Color based on type
+                let color;
+                if (block.type === 'grass_top') color = new THREE.Color(0x2D5016);
+                else if (block.type === 'grass_side') color = new THREE.Color(0x3a6b1f);
+                else if (block.type === 'dirt') color = new THREE.Color(0x8B7355);
+                else if (block.type === 'stone') color = new THREE.Color(0x808080);
+                else color = new THREE.Color(0xF4A460);
+
+                // Add box geometry
+                const vertices = [
+                    // Front
+                    x, y, z,
+                    x + blockSize, y, z,
+                    x + blockSize, y + blockSize, z,
+                    x, y + blockSize, z,
+                    // Back
+                    x, y, z + blockSize,
+                    x + blockSize, y, z + blockSize,
+                    x + blockSize, y + blockSize, z + blockSize,
+                    x, y + blockSize, z + blockSize,
+                    // Top
+                    x, y + blockSize, z,
+                    x + blockSize, y + blockSize, z,
+                    x + blockSize, y + blockSize, z + blockSize,
+                    x, y + blockSize, z + blockSize,
+                    // Bottom
+                    x, y, z,
+                    x + blockSize, y, z,
+                    x + blockSize, y, z + blockSize,
+                    x, y, z + blockSize,
+                    // Right
+                    x + blockSize, y, z,
+                    x + blockSize, y, z + blockSize,
+                    x + blockSize, y + blockSize, z + blockSize,
+                    x + blockSize, y + blockSize, z,
+                    // Left
+                    x, y, z,
+                    x, y, z + blockSize,
+                    x, y + blockSize, z + blockSize,
+                    x, y + blockSize, z
+                ];
+
+                // Add vertices
+                for (let i = 0; i < vertices.length; i += 3) {
+                    positions.push(vertices[i], vertices[i + 1], vertices[i + 2]);
+                    colors.push(color.r, color.g, color.b);
+                }
+
+                // Add indices and normals
+                const indexOffset = positions.length / 3 - 24;
+                
+                // Simple normals (pointing outward from cube)
+                const faceNormals = [
+                    [0, 0, -1], [0, 0, 1], [0, 1, 0], [0, -1, 0],
+                    [1, 0, 0], [-1, 0, 0]
+                ];
+
+                for (let face = 0; face < 6; face++) {
+                    const [nx, ny, nz] = faceNormals[face];
+                    for (let i = 0; i < 4; i++) {
+                        normals.push(nx, ny, nz);
+                    }
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+            geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(normals), 3));
+
+            const material = new THREE.MeshLambertMaterial({
+                vertexColors: true,
+                side: THREE.DoubleSide
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            
+            return mesh;
+        }
+
+        updateLoading(60, 'Loading chunks...');
 
         // Generate initial chunks
-        for (let cx = -game.renderDistance; cx <= game.renderDistance; cx++) {
-            for (let cz = -game.renderDistance; cz <= game.renderDistance; cz++) {
-                generateChunk(cx, cz);
+        for (let cx = -renderDistance; cx <= renderDistance; cx++) {
+            for (let cz = -renderDistance; cz <= renderDistance; cz++) {
+                const mesh = createChunkMesh(cx, cz);
+                chunkMeshes[getChunkKey(cx, cz)] = mesh;
+                scene.add(mesh);
             }
         }
 
-        updateLoading(60, 'Loading world data...');
+        updateLoading(85, 'Setting up controls...');
 
-        // ===== 3D PROJECTION =====
-        function project3D(x, y, z) {
-            // Translate relative to camera
-            let px = x - game.camera.x;
-            let py = y - game.camera.y;
-            let pz = z - game.camera.z;
+        // ===== PLAYER MOVEMENT =====
+        const player = {
+            position: new THREE.Vector3(0, 32, 0),
+            velocity: new THREE.Vector3(0, 0, 0),
+            isJumping: false,
+            speed: 0.2,
+            jumpForce: 0.8,
+            gravity: 0.02
+        };
 
-            // Rotate around Y axis (horizontal look)
-            let cosY = Math.cos(game.camera.rotY);
-            let sinY = Math.sin(game.camera.rotY);
-            let px2 = px * cosY - pz * sinY;
-            let pz2 = px * sinY + pz * cosY;
-            px = px2;
-            pz = pz2;
-
-            // Rotate around X axis (vertical look)
-            let cosX = Math.cos(game.camera.rotX);
-            let sinX = Math.sin(game.camera.rotX);
-            let py2 = py * cosX - pz * sinX;
-            let pz3 = py * sinX + pz * cosX;
-            py = py2;
-            pz = pz3;
-
-            // Perspective divide
-            if (pz <= 0.1) return null;
-
-            const scale = (canvas.width / 2) / Math.tan((game.camera.fov * Math.PI / 180) / 2);
-            const sx = (canvas.width / 2) + (px * scale) / pz;
-            const sy = (canvas.height / 2) - (py * scale) / pz;
-            const depth = pz;
-
-            return { x: sx, y: sy, depth, pz };
-        }
-
-        updateLoading(75, 'Setting up rendering...');
-
-        // ===== BLOCK RENDERING =====
-        function drawBlock(x, y, z, type) {
-            const blockSize = 1;
-            const vertices = [
-                // Front face corners
-                { x: x, y: y, z: z },
-                { x: x + blockSize, y: y, z: z },
-                { x: x + blockSize, y: y + blockSize, z: z },
-                { x: x, y: y + blockSize, z: z },
-                // Back face corners
-                { x: x, y: y, z: z + blockSize },
-                { x: x + blockSize, y: y, z: z + blockSize },
-                { x: x + blockSize, y: y + blockSize, z: z + blockSize },
-                { x: x, y: y + blockSize, z: z + blockSize }
-            ];
-
-            const projected = vertices.map(v => project3D(v.x, v.y, v.z));
-
-            // Skip if not visible
-            if (projected.some(p => p === null)) return;
-
-            // Draw visible faces (simplified - draw all faces)
-            const avgDepth = projected.reduce((a, b) => a + b.depth, 0) / projected.length;
-
-            // Top face (y + 1)
-            if (y + 1 > game.camera.y - 5) {
-                ctx.fillStyle = blockColors.grass_top;
-                ctx.beginPath();
-                ctx.moveTo(projected[3].x, projected[3].y);
-                ctx.lineTo(projected[2].x, projected[2].y);
-                ctx.lineTo(projected[6].x, projected[6].y);
-                ctx.lineTo(projected[7].x, projected[7].y);
-                ctx.fill();
-                ctx.strokeStyle = '#000';
-                ctx.lineWidth = 0.5;
-                ctx.stroke();
-            }
-
-            // Front face (z)
-            ctx.fillStyle = type === 'grass_top' ? blockColors.grass_side : blockColors[type] || '#666';
-            ctx.beginPath();
-            ctx.moveTo(projected[0].x, projected[0].y);
-            ctx.lineTo(projected[1].x, projected[1].y);
-            ctx.lineTo(projected[2].x, projected[2].y);
-            ctx.lineTo(projected[3].x, projected[3].y);
-            ctx.fill();
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 0.5;
-            ctx.stroke();
-
-            // Right face (x + 1)
-            ctx.fillStyle = type === 'grass_top' ? blockColors.grass_side : blockColors[type] || '#555';
-            ctx.beginPath();
-            ctx.moveTo(projected[1].x, projected[1].y);
-            ctx.lineTo(projected[5].x, projected[5].y);
-            ctx.lineTo(projected[6].x, projected[6].y);
-            ctx.lineTo(projected[2].x, projected[2].y);
-            ctx.fill();
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 0.5;
-            ctx.stroke();
-
-            return { avgDepth, type };
-        }
-
-        updateLoading(85, 'Initializing input system...');
-
-        // ===== INPUT HANDLING =====
         const keys = {};
         window.addEventListener('keydown', (e) => {
             keys[e.key.toLowerCase()] = true;
             if (e.key === ' ') {
                 e.preventDefault();
-                if (!game.camera.isJumping) {
-                    game.camera.jumpVel = 1;
-                    game.camera.isJumping = true;
+                if (!player.isJumping) {
+                    player.velocity.y = player.jumpForce;
+                    player.isJumping = true;
                 }
             }
         });
@@ -381,135 +390,123 @@
         });
 
         // Mouse look
-        let mouseX = 0;
-        let mouseY = 0;
+        let yaw = 0;
+        let pitch = 0;
+        const maxPitch = Math.PI / 2.5;
+
         document.addEventListener('mousemove', (e) => {
-            mouseX = e.clientX;
-            mouseY = e.clientY;
+            const sensitivity = 0.003;
+            yaw -= e.movementX * sensitivity;
+            pitch -= e.movementY * sensitivity;
+            pitch = Math.max(-maxPitch, Math.min(maxPitch, pitch));
         });
 
-        updateLoading(95, 'Starting game engine...');
-
-        // ===== GAME UPDATE =====
-        function update() {
-            // Mouse look (inverted for natural feel)
-            game.camera.rotY = (mouseX / canvas.width - 0.5) * Math.PI * 2;
-            game.camera.rotX = (mouseY / canvas.height - 0.5) * Math.PI;
-
-            // Movement
-            const moveSpeed = 0.3;
-            if (keys['w'] || keys['arrowup']) {
-                game.camera.x += Math.cos(game.camera.rotY) * moveSpeed;
-                game.camera.z += Math.sin(game.camera.rotY) * moveSpeed;
-            }
-            if (keys['s'] || keys['arrowdown']) {
-                game.camera.x -= Math.cos(game.camera.rotY) * moveSpeed;
-                game.camera.z -= Math.sin(game.camera.rotY) * moveSpeed;
-            }
-            if (keys['a'] || keys['arrowleft']) {
-                game.camera.x += Math.cos(game.camera.rotY - Math.PI / 2) * moveSpeed;
-                game.camera.z += Math.sin(game.camera.rotY - Math.PI / 2) * moveSpeed;
-            }
-            if (keys['d'] || keys['arrowright']) {
-                game.camera.x += Math.cos(game.camera.rotY + Math.PI / 2) * moveSpeed;
-                game.camera.z += Math.sin(game.camera.rotY + Math.PI / 2) * moveSpeed;
-            }
-
-            // Jump physics
-            if (game.camera.isJumping) {
-                game.camera.jumpVel -= 0.15;
-                game.camera.y += game.camera.jumpVel;
-
-                if (game.camera.y <= 32) {
-                    game.camera.y = 32;
-                    game.camera.isJumping = false;
-                    game.camera.jumpVel = 0;
-                }
-            }
-
-            // Keep player above ground
-            if (game.camera.y < 32) game.camera.y = 32;
-        }
+        document.addEventListener('click', () => {
+            canvas.requestPointerLock = canvas.requestPointerLock || canvas.mozRequestPointerLock;
+            canvas.requestPointerLock();
+        });
 
         updateLoading(100, 'Ready to play!');
 
         // ===== GAME LOOP =====
+        let lastTime = Date.now();
+        let frameCount = 0;
+        let fps = 0;
+
         setTimeout(() => {
             document.getElementById('loadingScreen').style.display = 'none';
 
-            function gameLoop() {
-                const startTime = performance.now();
+            function animate() {
+                requestAnimationFrame(animate);
 
-                // Clear canvas with sky color
-                ctx.fillStyle = '#87CEEB';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                const now = Date.now();
+                const dt = Math.min((now - lastTime) / 1000, 0.016);
+                lastTime = now;
 
-                update();
+                // Movement
+                const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+                const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
 
-                // Determine which chunks to render
-                const playerChunkX = Math.floor(game.camera.x / game.chunkSize);
-                const playerChunkZ = Math.floor(game.camera.z / game.chunkSize);
+                if (keys['w'] || keys['arrowup']) player.position.addScaledVector(forward, player.speed);
+                if (keys['s'] || keys['arrowdown']) player.position.addScaledVector(forward, -player.speed);
+                if (keys['a'] || keys['arrowleft']) player.position.addScaledVector(right, -player.speed);
+                if (keys['d'] || keys['arrowright']) player.position.addScaledVector(right, player.speed);
 
-                let blocksToRender = [];
-                let chunksLoaded = 0;
+                // Gravity
+                player.velocity.y -= player.gravity;
+                player.position.y += player.velocity.y;
 
-                // Collect visible blocks from nearby chunks
-                for (let cx = playerChunkX - game.renderDistance; cx <= playerChunkX + game.renderDistance; cx++) {
-                    for (let cz = playerChunkZ - game.renderDistance; cz <= playerChunkZ + game.renderDistance; cz++) {
+                // Ground collision (simple)
+                if (player.position.y < 32) {
+                    player.position.y = 32;
+                    player.velocity.y = 0;
+                    player.isJumping = false;
+                }
+
+                // Boundary checks
+                if (player.position.x < -100) player.position.x = -100;
+                if (player.position.x > 100) player.position.x = 100;
+                if (player.position.z < -100) player.position.z = -100;
+                if (player.position.z > 100) player.position.z = 100;
+
+                // Update camera
+                camera.position.copy(player.position);
+                camera.rotation.order = 'YXZ';
+                camera.rotation.y = yaw;
+                camera.rotation.x = pitch;
+
+                // Chunk loading/unloading
+                const playerChunkX = Math.floor(player.position.x / chunkSize);
+                const playerChunkZ = Math.floor(player.position.z / chunkSize);
+
+                for (let cx = playerChunkX - renderDistance; cx <= playerChunkX + renderDistance; cx++) {
+                    for (let cz = playerChunkZ - renderDistance; cz <= playerChunkZ + renderDistance; cz++) {
                         const key = getChunkKey(cx, cz);
-                        if (!game.blocks[key]) {
-                            generateChunk(cx, cz);
-                        }
-                        chunksLoaded++;
-
-                        // Only render blocks close to camera
-                        const chunk = game.blocks[key];
-                        for (let block of chunk) {
-                            const dist = Math.sqrt(
-                                Math.pow(block.x - game.camera.x, 2) +
-                                Math.pow(block.z - game.camera.z, 2)
-                            );
-
-                            if (dist < 32) {
-                                blocksToRender.push(block);
-                            }
+                        if (!chunkMeshes[key]) {
+                            const mesh = createChunkMesh(cx, cz);
+                            chunkMeshes[key] = mesh;
+                            scene.add(mesh);
                         }
                     }
                 }
 
-                // Sort by depth and render
-                let renderedCount = 0;
-                for (let block of blocksToRender) {
-                    drawBlock(block.x, block.y, block.z, block.type);
-                    renderedCount++;
+                // Unload distant chunks
+                const keysToRemove = [];
+                for (let key in chunkMeshes) {
+                    const [cx, cz] = key.split(',').map(Number);
+                    const dist = Math.sqrt(Math.pow(cx - playerChunkX, 2) + Math.pow(cz - playerChunkZ, 2));
+                    if (dist > renderDistance + 1) {
+                        scene.remove(chunkMeshes[key]);
+                        chunkMeshes[key].geometry.dispose();
+                        keysToRemove.push(key);
+                    }
                 }
-
-                // FPS counter
-                game.frameCount++;
-                const now = Date.now();
-                if (now - game.lastTime >= 1000) {
-                    game.fps = game.frameCount;
-                    game.frameCount = 0;
-                    game.lastTime = now;
-                }
+                keysToRemove.forEach(key => delete chunkMeshes[key]);
 
                 // Update HUD
-                document.getElementById('fps').textContent = game.fps;
-                document.getElementById('chunksLoaded').textContent = chunksLoaded;
-                document.getElementById('blocksRendered').textContent = renderedCount;
-                document.getElementById('posX').textContent = Math.floor(game.camera.x);
-                document.getElementById('posY').textContent = Math.floor(game.camera.y);
-                document.getElementById('posZ').textContent = Math.floor(game.camera.z);
+                frameCount++;
+                if (now - lastTime > 1000) {
+                    fps = frameCount;
+                    frameCount = 0;
+                    lastTime = now;
+                }
 
-                requestAnimationFrame(gameLoop);
+                document.getElementById('fps').textContent = fps;
+                document.getElementById('blocksRendered').textContent = Object.keys(chunkMeshes).length;
+                document.getElementById('posX').textContent = Math.floor(player.position.x);
+                document.getElementById('posY').textContent = Math.floor(player.position.y);
+                document.getElementById('posZ').textContent = Math.floor(player.position.z);
+
+                renderer.render(scene, camera);
             }
 
-            gameLoop();
+            animate();
         }, 1500);
 
         window.addEventListener('resize', () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
         });
     </script>
 </body>
