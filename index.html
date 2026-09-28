@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Minecraft</title>
+    <title>Simple 3D Minecraft</title>
     <style>
         * {
             margin: 0;
@@ -14,13 +14,88 @@
         body {
             font-family: Arial, sans-serif;
             overflow: hidden;
-            background: #87CEEB;
+            background: #000;
         }
 
         canvas {
             display: block;
             width: 100vw;
             height: 100vh;
+        }
+
+        #loadingScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+        }
+
+        .loading-content {
+            text-align: center;
+            color: white;
+        }
+
+        .loading-title {
+            font-size: 48px;
+            font-weight: bold;
+            margin-bottom: 30px;
+            color: #00ff00;
+            text-shadow: 0 0 10px #00ff00;
+        }
+
+        .loading-bar-container {
+            width: 300px;
+            height: 30px;
+            background: #333;
+            border: 2px solid #00ff00;
+            margin-bottom: 20px;
+            overflow: hidden;
+            border-radius: 5px;
+        }
+
+        .loading-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff00, #00cc00);
+            width: 0%;
+            transition: width 0.1s ease;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        .loading-text {
+            font-size: 18px;
+            color: #aaa;
+        }
+
+        .loading-percentage {
+            font-size: 24px;
+            color: #00ff00;
+            margin-top: 15px;
+            font-weight: bold;
+        }
+
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 14px;
+            font-family: monospace;
+            z-index: 100;
+        }
+
+        #hud div {
+            margin: 5px 0;
         }
 
         #inventory {
@@ -35,6 +110,7 @@
             grid-template-columns: repeat(9, 40px);
             gap: 5px;
             border-radius: 5px;
+            z-index: 100;
         }
 
         .inventory-slot {
@@ -45,7 +121,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
+            font-size: 10px;
             color: white;
             border-radius: 3px;
         }
@@ -54,46 +130,33 @@
             border: 2px solid #FFD700;
             background: rgba(150, 150, 150, 0.8);
         }
-
-        #info {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 14px;
-        }
-
-        #jumpInfo {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            color: white;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 14px;
-        }
     </style>
 </head>
 <body>
-    <canvas id="gameCanvas"></canvas>
-    
-    <div id="info">
-        <div>Simple Minecraft</div>
-        <div>Use WASD to move, SPACE to jump</div>
+    <div id="loadingScreen">
+        <div class="loading-content">
+            <div class="loading-title">🎮 MINECRAFT 3D</div>
+            <div class="loading-bar-container">
+                <div class="loading-bar" id="loadingBar"></div>
+            </div>
+            <div class="loading-text" id="loadingText">Initializing...</div>
+            <div class="loading-percentage" id="loadingPercent">0%</div>
+        </div>
     </div>
 
-    <div id="jumpInfo">
-        <div>Blocks placed: <span id="blockCount">0</span></div>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="hud">
+        <div>FPS: <span id="fps">0</span></div>
+        <div>Chunks Loaded: <span id="chunksLoaded">0</span></div>
+        <div>Blocks Rendered: <span id="blocksRendered">0</span></div>
+        <div>Position: X:<span id="posX">0</span> Y:<span id="posY">0</span> Z:<span id="posZ">0</span></div>
     </div>
 
     <div id="inventory">
-        <div class="inventory-slot selected">Dirt</div>
+        <div class="inventory-slot selected">Grass</div>
+        <div class="inventory-slot">Dirt</div>
         <div class="inventory-slot">Stone</div>
-        <div class="inventory-slot">Grass</div>
         <div class="inventory-slot">Sand</div>
         <div class="inventory-slot">Wood</div>
         <div class="inventory-slot">Leaves</div>
@@ -103,49 +166,213 @@
     </div>
 
     <script>
+        // ===== LOADING SCREEN =====
+        let loadingProgress = 0;
+        function updateLoading(percent, text) {
+            loadingProgress = percent;
+            document.getElementById('loadingBar').style.width = percent + '%';
+            document.getElementById('loadingPercent').textContent = Math.floor(percent) + '%';
+            document.getElementById('loadingText').textContent = text;
+        }
+
+        // ===== CANVAS SETUP =====
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
 
-        // Block types with colors
-        const blockTypes = {
-            grass: '#2D5016',
+        updateLoading(10, 'Setting up canvas...');
+
+        // ===== 3D ENGINE =====
+        const game = {
+            camera: {
+                x: 0,
+                y: 30,
+                z: 0,
+                rotX: 0,
+                rotY: 0,
+                fov: 60,
+                speed: 0.5,
+                jumpVel: 0,
+                isJumping: false
+            },
+            blocks: {},
+            chunkSize: 16,
+            renderDistance: 3,
+            time: 0,
+            frameCount: 0,
+            lastTime: Date.now(),
+            fps: 0
+        };
+
+        // ===== BLOCK COLORS (SIMPLE 3D) =====
+        const blockColors = {
+            grass_top: '#2D5016',
+            grass_side: '#3a6b1f',
             dirt: '#8B7355',
             stone: '#808080',
+            stone_dark: '#696969',
             sand: '#F4A460',
-            wood: '#654321',
-            leaves: '#228B22',
-            glass: '#87CEEB',
-            cobble: '#696969'
+            sand_dark: '#d4944a'
         };
 
-        // Game state
-        const game = {
-            blockSize: 40,
-            worldHeight: 3,
-            player: {
-                x: canvas.width / 2,
-                y: canvas.height / 2 - 100,
-                width: 20,
-                height: 30,
-                velocityY: 0,
-                isJumping: false,
-                speed: 5,
-                jumpPower: 15
-            },
-            blocks: [],
-            blocksPlaced: 0
-        };
+        updateLoading(25, 'Initializing chunk system...');
 
-        // Input handling
+        // ===== CHUNK GENERATION =====
+        function getChunkKey(cx, cz) {
+            return `${cx},${cz}`;
+        }
+
+        function generateChunk(cx, cz) {
+            const blocks = [];
+            const startX = cx * game.chunkSize;
+            const startZ = cz * game.chunkSize;
+
+            // Create 4 layers of blocks
+            for (let y = 0; y < 4; y++) {
+                for (let x = 0; x < game.chunkSize; x++) {
+                    for (let z = 0; z < game.chunkSize; z++) {
+                        let blockType = 'dirt';
+                        if (y === 0) blockType = 'stone';
+                        else if (y === 3) blockType = 'grass_top';
+
+                        blocks.push({
+                            x: startX + x,
+                            y: y,
+                            z: startZ + z,
+                            type: blockType
+                        });
+                    }
+                }
+            }
+
+            game.blocks[getChunkKey(cx, cz)] = blocks;
+        }
+
+        updateLoading(40, 'Generating world chunks...');
+
+        // Generate initial chunks
+        for (let cx = -game.renderDistance; cx <= game.renderDistance; cx++) {
+            for (let cz = -game.renderDistance; cz <= game.renderDistance; cz++) {
+                generateChunk(cx, cz);
+            }
+        }
+
+        updateLoading(60, 'Loading world data...');
+
+        // ===== 3D PROJECTION =====
+        function project3D(x, y, z) {
+            // Translate relative to camera
+            let px = x - game.camera.x;
+            let py = y - game.camera.y;
+            let pz = z - game.camera.z;
+
+            // Rotate around Y axis (horizontal look)
+            let cosY = Math.cos(game.camera.rotY);
+            let sinY = Math.sin(game.camera.rotY);
+            let px2 = px * cosY - pz * sinY;
+            let pz2 = px * sinY + pz * cosY;
+            px = px2;
+            pz = pz2;
+
+            // Rotate around X axis (vertical look)
+            let cosX = Math.cos(game.camera.rotX);
+            let sinX = Math.sin(game.camera.rotX);
+            let py2 = py * cosX - pz * sinX;
+            let pz3 = py * sinX + pz * cosX;
+            py = py2;
+            pz = pz3;
+
+            // Perspective divide
+            if (pz <= 0.1) return null;
+
+            const scale = (canvas.width / 2) / Math.tan((game.camera.fov * Math.PI / 180) / 2);
+            const sx = (canvas.width / 2) + (px * scale) / pz;
+            const sy = (canvas.height / 2) - (py * scale) / pz;
+            const depth = pz;
+
+            return { x: sx, y: sy, depth, pz };
+        }
+
+        updateLoading(75, 'Setting up rendering...');
+
+        // ===== BLOCK RENDERING =====
+        function drawBlock(x, y, z, type) {
+            const blockSize = 1;
+            const vertices = [
+                // Front face corners
+                { x: x, y: y, z: z },
+                { x: x + blockSize, y: y, z: z },
+                { x: x + blockSize, y: y + blockSize, z: z },
+                { x: x, y: y + blockSize, z: z },
+                // Back face corners
+                { x: x, y: y, z: z + blockSize },
+                { x: x + blockSize, y: y, z: z + blockSize },
+                { x: x + blockSize, y: y + blockSize, z: z + blockSize },
+                { x: x, y: y + blockSize, z: z + blockSize }
+            ];
+
+            const projected = vertices.map(v => project3D(v.x, v.y, v.z));
+
+            // Skip if not visible
+            if (projected.some(p => p === null)) return;
+
+            // Draw visible faces (simplified - draw all faces)
+            const avgDepth = projected.reduce((a, b) => a + b.depth, 0) / projected.length;
+
+            // Top face (y + 1)
+            if (y + 1 > game.camera.y - 5) {
+                ctx.fillStyle = blockColors.grass_top;
+                ctx.beginPath();
+                ctx.moveTo(projected[3].x, projected[3].y);
+                ctx.lineTo(projected[2].x, projected[2].y);
+                ctx.lineTo(projected[6].x, projected[6].y);
+                ctx.lineTo(projected[7].x, projected[7].y);
+                ctx.fill();
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+            }
+
+            // Front face (z)
+            ctx.fillStyle = type === 'grass_top' ? blockColors.grass_side : blockColors[type] || '#666';
+            ctx.beginPath();
+            ctx.moveTo(projected[0].x, projected[0].y);
+            ctx.lineTo(projected[1].x, projected[1].y);
+            ctx.lineTo(projected[2].x, projected[2].y);
+            ctx.lineTo(projected[3].x, projected[3].y);
+            ctx.fill();
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+
+            // Right face (x + 1)
+            ctx.fillStyle = type === 'grass_top' ? blockColors.grass_side : blockColors[type] || '#555';
+            ctx.beginPath();
+            ctx.moveTo(projected[1].x, projected[1].y);
+            ctx.lineTo(projected[5].x, projected[5].y);
+            ctx.lineTo(projected[6].x, projected[6].y);
+            ctx.lineTo(projected[2].x, projected[2].y);
+            ctx.fill();
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+
+            return { avgDepth, type };
+        }
+
+        updateLoading(85, 'Initializing input system...');
+
+        // ===== INPUT HANDLING =====
         const keys = {};
         window.addEventListener('keydown', (e) => {
             keys[e.key.toLowerCase()] = true;
             if (e.key === ' ') {
                 e.preventDefault();
-                jump();
+                if (!game.camera.isJumping) {
+                    game.camera.jumpVel = 1;
+                    game.camera.isJumping = true;
+                }
             }
         });
 
@@ -153,123 +380,133 @@
             keys[e.key.toLowerCase()] = false;
         });
 
-        // Generate flat world
-        function generateWorld() {
-            game.blocks = [];
-            const groundY = canvas.height - 100;
-            
-            // Create 3 layers of grass blocks
-            for (let layer = 0; layer < game.worldHeight; layer++) {
-                for (let x = 0; x < canvas.width; x += game.blockSize) {
-                    game.blocks.push({
-                        x: x,
-                        y: groundY + (layer * game.blockSize),
-                        type: layer === 0 ? 'grass' : 'dirt',
-                        width: game.blockSize,
-                        height: game.blockSize
-                    });
-                }
-            }
-        }
+        // Mouse look
+        let mouseX = 0;
+        let mouseY = 0;
+        document.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
 
-        // Jump mechanics
-        function jump() {
-            if (!game.player.isJumping) {
-                game.player.velocityY = -game.player.jumpPower;
-                game.player.isJumping = true;
-            }
-        }
+        updateLoading(95, 'Starting game engine...');
 
-        // Update player
-        function updatePlayer() {
-            // Horizontal movement
+        // ===== GAME UPDATE =====
+        function update() {
+            // Mouse look (inverted for natural feel)
+            game.camera.rotY = (mouseX / canvas.width - 0.5) * Math.PI * 2;
+            game.camera.rotX = (mouseY / canvas.height - 0.5) * Math.PI;
+
+            // Movement
+            const moveSpeed = 0.3;
             if (keys['w'] || keys['arrowup']) {
-                game.player.y -= game.player.speed;
+                game.camera.x += Math.cos(game.camera.rotY) * moveSpeed;
+                game.camera.z += Math.sin(game.camera.rotY) * moveSpeed;
             }
             if (keys['s'] || keys['arrowdown']) {
-                game.player.y += game.player.speed;
+                game.camera.x -= Math.cos(game.camera.rotY) * moveSpeed;
+                game.camera.z -= Math.sin(game.camera.rotY) * moveSpeed;
             }
             if (keys['a'] || keys['arrowleft']) {
-                game.player.x -= game.player.speed;
+                game.camera.x += Math.cos(game.camera.rotY - Math.PI / 2) * moveSpeed;
+                game.camera.z += Math.sin(game.camera.rotY - Math.PI / 2) * moveSpeed;
             }
             if (keys['d'] || keys['arrowright']) {
-                game.player.x += game.player.speed;
+                game.camera.x += Math.cos(game.camera.rotY + Math.PI / 2) * moveSpeed;
+                game.camera.z += Math.sin(game.camera.rotY + Math.PI / 2) * moveSpeed;
             }
 
-            // Gravity
-            game.player.velocityY += 0.6;
-            game.player.y += game.player.velocityY;
+            // Jump physics
+            if (game.camera.isJumping) {
+                game.camera.jumpVel -= 0.15;
+                game.camera.y += game.camera.jumpVel;
 
-            // Collision detection with blocks
-            let onBlock = false;
-            for (let block of game.blocks) {
-                if (
-                    game.player.x + game.player.width > block.x &&
-                    game.player.x < block.x + block.width &&
-                    game.player.y + game.player.height > block.y &&
-                    game.player.y + game.player.height < block.y + block.height + 10
-                ) {
-                    game.player.y = block.y - game.player.height;
-                    game.player.velocityY = 0;
-                    game.player.isJumping = false;
-                    onBlock = true;
+                if (game.camera.y <= 32) {
+                    game.camera.y = 32;
+                    game.camera.isJumping = false;
+                    game.camera.jumpVel = 0;
                 }
             }
 
-            // Boundary checks
-            if (game.player.x < 0) game.player.x = 0;
-            if (game.player.x + game.player.width > canvas.width) {
-                game.player.x = canvas.width - game.player.width;
-            }
-            if (game.player.y < 0) game.player.y = 0;
-            if (game.player.y > canvas.height) {
-                // Reset position if fell off world
-                game.player.y = canvas.height / 2 - 100;
-                game.player.velocityY = 0;
-            }
+            // Keep player above ground
+            if (game.camera.y < 32) game.camera.y = 32;
         }
 
-        // Draw everything
-        function draw() {
-            // Sky
-            ctx.fillStyle = '#87CEEB';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        updateLoading(100, 'Ready to play!');
 
-            // Draw blocks
-            for (let block of game.blocks) {
-                ctx.fillStyle = blockTypes[block.type];
-                ctx.fillRect(block.x, block.y, block.width, block.height);
-                
-                // Block border
-                ctx.strokeStyle = '#000';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(block.x, block.y, block.width, block.height);
+        // ===== GAME LOOP =====
+        setTimeout(() => {
+            document.getElementById('loadingScreen').style.display = 'none';
+
+            function gameLoop() {
+                const startTime = performance.now();
+
+                // Clear canvas with sky color
+                ctx.fillStyle = '#87CEEB';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                update();
+
+                // Determine which chunks to render
+                const playerChunkX = Math.floor(game.camera.x / game.chunkSize);
+                const playerChunkZ = Math.floor(game.camera.z / game.chunkSize);
+
+                let blocksToRender = [];
+                let chunksLoaded = 0;
+
+                // Collect visible blocks from nearby chunks
+                for (let cx = playerChunkX - game.renderDistance; cx <= playerChunkX + game.renderDistance; cx++) {
+                    for (let cz = playerChunkZ - game.renderDistance; cz <= playerChunkZ + game.renderDistance; cz++) {
+                        const key = getChunkKey(cx, cz);
+                        if (!game.blocks[key]) {
+                            generateChunk(cx, cz);
+                        }
+                        chunksLoaded++;
+
+                        // Only render blocks close to camera
+                        const chunk = game.blocks[key];
+                        for (let block of chunk) {
+                            const dist = Math.sqrt(
+                                Math.pow(block.x - game.camera.x, 2) +
+                                Math.pow(block.z - game.camera.z, 2)
+                            );
+
+                            if (dist < 32) {
+                                blocksToRender.push(block);
+                            }
+                        }
+                    }
+                }
+
+                // Sort by depth and render
+                let renderedCount = 0;
+                for (let block of blocksToRender) {
+                    drawBlock(block.x, block.y, block.z, block.type);
+                    renderedCount++;
+                }
+
+                // FPS counter
+                game.frameCount++;
+                const now = Date.now();
+                if (now - game.lastTime >= 1000) {
+                    game.fps = game.frameCount;
+                    game.frameCount = 0;
+                    game.lastTime = now;
+                }
+
+                // Update HUD
+                document.getElementById('fps').textContent = game.fps;
+                document.getElementById('chunksLoaded').textContent = chunksLoaded;
+                document.getElementById('blocksRendered').textContent = renderedCount;
+                document.getElementById('posX').textContent = Math.floor(game.camera.x);
+                document.getElementById('posY').textContent = Math.floor(game.camera.y);
+                document.getElementById('posZ').textContent = Math.floor(game.camera.z);
+
+                requestAnimationFrame(gameLoop);
             }
 
-            // Draw player
-            ctx.fillStyle = '#FF9966';
-            ctx.fillRect(game.player.x, game.player.y, game.player.width, game.player.height);
-            
-            // Player head
-            ctx.fillStyle = '#FFCC99';
-            ctx.fillRect(game.player.x + 2, game.player.y - 10, game.player.width - 4, 10);
+            gameLoop();
+        }, 1500);
 
-            // Update block count display
-            document.getElementById('blockCount').textContent = game.blocksPlaced;
-        }
-
-        // Game loop
-        function gameLoop() {
-            updatePlayer();
-            draw();
-            requestAnimationFrame(gameLoop);
-        }
-
-        // Initialize and start
-        generateWorld();
-        gameLoop();
-
-        // Handle window resize
         window.addEventListener('resize', () => {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
