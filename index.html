@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Minecraft</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            background: #87CEEB;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #inventory {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid #888;
+            padding: 10px;
+            display: grid;
+            grid-template-columns: repeat(9, 40px);
+            gap: 5px;
+            border-radius: 5px;
+        }
+
+        .inventory-slot {
+            width: 40px;
+            height: 40px;
+            background: rgba(100, 100, 100, 0.8);
+            border: 1px solid #444;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            color: white;
+            border-radius: 3px;
+        }
+
+        .inventory-slot.selected {
+            border: 2px solid #FFD700;
+            background: rgba(150, 150, 150, 0.8);
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        #jumpInfo {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="info">
+        <div>Simple Minecraft</div>
+        <div>Use WASD to move, SPACE to jump</div>
+    </div>
+
+    <div id="jumpInfo">
+        <div>Blocks placed: <span id="blockCount">0</span></div>
+    </div>
+
+    <div id="inventory">
+        <div class="inventory-slot selected">Dirt</div>
+        <div class="inventory-slot">Stone</div>
+        <div class="inventory-slot">Grass</div>
+        <div class="inventory-slot">Sand</div>
+        <div class="inventory-slot">Wood</div>
+        <div class="inventory-slot">Leaves</div>
+        <div class="inventory-slot">Glass</div>
+        <div class="inventory-slot">Cobble</div>
+        <div class="inventory-slot">Coal</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Block types with colors
+        const blockTypes = {
+            grass: '#2D5016',
+            dirt: '#8B7355',
+            stone: '#808080',
+            sand: '#F4A460',
+            wood: '#654321',
+            leaves: '#228B22',
+            glass: '#87CEEB',
+            cobble: '#696969'
+        };
+
+        // Game state
+        const game = {
+            blockSize: 40,
+            worldHeight: 3,
+            player: {
+                x: canvas.width / 2,
+                y: canvas.height / 2 - 100,
+                width: 20,
+                height: 30,
+                velocityY: 0,
+                isJumping: false,
+                speed: 5,
+                jumpPower: 15
+            },
+            blocks: [],
+            blocksPlaced: 0
+        };
+
+        // Input handling
+        const keys = {};
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key === ' ') {
+                e.preventDefault();
+                jump();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        // Generate flat world
+        function generateWorld() {
+            game.blocks = [];
+            const groundY = canvas.height - 100;
+            
+            // Create 3 layers of grass blocks
+            for (let layer = 0; layer < game.worldHeight; layer++) {
+                for (let x = 0; x < canvas.width; x += game.blockSize) {
+                    game.blocks.push({
+                        x: x,
+                        y: groundY + (layer * game.blockSize),
+                        type: layer === 0 ? 'grass' : 'dirt',
+                        width: game.blockSize,
+                        height: game.blockSize
+                    });
+                }
+            }
+        }
+
+        // Jump mechanics
+        function jump() {
+            if (!game.player.isJumping) {
+                game.player.velocityY = -game.player.jumpPower;
+                game.player.isJumping = true;
+            }
+        }
+
+        // Update player
+        function updatePlayer() {
+            // Horizontal movement
+            if (keys['w'] || keys['arrowup']) {
+                game.player.y -= game.player.speed;
+            }
+            if (keys['s'] || keys['arrowdown']) {
+                game.player.y += game.player.speed;
+            }
+            if (keys['a'] || keys['arrowleft']) {
+                game.player.x -= game.player.speed;
+            }
+            if (keys['d'] || keys['arrowright']) {
+                game.player.x += game.player.speed;
+            }
+
+            // Gravity
+            game.player.velocityY += 0.6;
+            game.player.y += game.player.velocityY;
+
+            // Collision detection with blocks
+            let onBlock = false;
+            for (let block of game.blocks) {
+                if (
+                    game.player.x + game.player.width > block.x &&
+                    game.player.x < block.x + block.width &&
+                    game.player.y + game.player.height > block.y &&
+                    game.player.y + game.player.height < block.y + block.height + 10
+                ) {
+                    game.player.y = block.y - game.player.height;
+                    game.player.velocityY = 0;
+                    game.player.isJumping = false;
+                    onBlock = true;
+                }
+            }
+
+            // Boundary checks
+            if (game.player.x < 0) game.player.x = 0;
+            if (game.player.x + game.player.width > canvas.width) {
+                game.player.x = canvas.width - game.player.width;
+            }
+            if (game.player.y < 0) game.player.y = 0;
+            if (game.player.y > canvas.height) {
+                // Reset position if fell off world
+                game.player.y = canvas.height / 2 - 100;
+                game.player.velocityY = 0;
+            }
+        }
+
+        // Draw everything
+        function draw() {
+            // Sky
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw blocks
+            for (let block of game.blocks) {
+                ctx.fillStyle = blockTypes[block.type];
+                ctx.fillRect(block.x, block.y, block.width, block.height);
+                
+                // Block border
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(block.x, block.y, block.width, block.height);
+            }
+
+            // Draw player
+            ctx.fillStyle = '#FF9966';
+            ctx.fillRect(game.player.x, game.player.y, game.player.width, game.player.height);
+            
+            // Player head
+            ctx.fillStyle = '#FFCC99';
+            ctx.fillRect(game.player.x + 2, game.player.y - 10, game.player.width - 4, 10);
+
+            // Update block count display
+            document.getElementById('blockCount').textContent = game.blocksPlaced;
+        }
+
+        // Game loop
+        function gameLoop() {
+            updatePlayer();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Initialize and start
+        generateWorld();
+        gameLoop();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>
