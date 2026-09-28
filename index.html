@@ -38,8 +38,6 @@ scene.background=new THREE.Color(0x87ceeb);
 scene.fog=new THREE.Fog(0x87ceeb,150,300);
 
 const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
-camera.position.y=32;
-
 const renderer=new THREE.WebGLRenderer({canvas,antialias:false});
 renderer.setSize(innerWidth,innerHeight);
 renderer.setPixelRatio(1);
@@ -47,10 +45,8 @@ renderer.setPixelRatio(1);
 load(20,'Adding lights...');
 scene.add(new THREE.AmbientLight(0xffffff,0.7));
 const sun=new THREE.DirectionalLight(0xffffff,0.5);
-sun.position.set(100,150,100);
-scene.add(sun);
+sun.position.set(100,150,100); scene.add(sun);
 
-load(30,'Creating blocks...');
 const blockTypes=[
  {name:'Grass',color:0x2d5016},
  {name:'Dirt',color:0x8b5a35},
@@ -63,8 +59,7 @@ const blockTypes=[
  {name:'Coal',color:0x1a1a1a}
 ];
 
-let selectedBlock=0;
-const inventory=$('inventory');
+let selectedBlock=0; const inventory=$('inventory');
 blockTypes.forEach((t,i)=>{
  const btn=document.createElement('button');
  btn.className='slot'+(i===0?' selected':'');
@@ -72,27 +67,19 @@ blockTypes.forEach((t,i)=>{
  btn.onclick=()=>selectBlock(i);
  inventory.appendChild(btn);
 });
+function selectBlock(i){selectedBlock=i; document.querySelectorAll('.slot').forEach((s,idx)=>s.classList.toggle('selected',idx===i)); const t=blockTypes[selectedBlock]; $('selectedSwatch').style.background='#'+t.color.toString(16).padStart(6,'0'); $('selectedName').textContent=t.name; $('selectedNameHUD').textContent=t.name;}
+selectBlock(0);
 
-function selectBlock(i){
- selectedBlock=i;
- document.querySelectorAll('.slot').forEach((s,idx)=>s.classList.toggle('selected',idx===i));
- const t=blockTypes[selectedBlock];
- $('selectedSwatch').style.background='#'+t.color.toString(16).padStart(6,'0');
- $('selectedName').textContent=t.name;
- $('selectedNameHUD').textContent=t.name;
-}
-
-load(40,'Building world...');
-
-const CHUNK_SIZE=16;
-const WORLD_HEIGHT=10;
-const RENDER_DIST=3;
+const CHUNK_SIZE=16, WORLD_HEIGHT=12, RENDER_DIST=3;
 const blockMap=new Map();
 const chunkMeshes=new Map();
+const boxGeo=new THREE.BoxGeometry(1,1,1); const matCache=new Map();
+const walkHalf=0.35; // player's collision size
 
 function blockKey(x,y,z){return x+','+y+','+z}
 function chunkKey(cx,cz){return cx+','+cz}
 function getChunkCoords(x,z){return {cx:Math.floor(x/CHUNK_SIZE),cz:Math.floor(z/CHUNK_SIZE)}}
+function getMat(color){if(!matCache.has(color)) matCache.set(color,new THREE.MeshLambertMaterial({color,flatShading:true})); return matCache.get(color);}
 
 function addGroundChunk(cx,cz){
  for(let x=0;x<CHUNK_SIZE;x++){
@@ -100,24 +87,14 @@ function addGroundChunk(cx,cz){
    const wx=cx*CHUNK_SIZE+x;
    const wz=cz*CHUNK_SIZE+z;
    for(let y=0;y<4;y++){
-    const type = y===3 ? 0 : 1; // grass, dirt
+    const type = y===3 ? 0 : 1;
     blockMap.set(blockKey(wx,y,wz), type);
    }
   }
  }
 }
-
 for(let cx=-RENDER_DIST;cx<=RENDER_DIST;cx++){
- for(let cz=-RENDER_DIST;cz<=RENDER_DIST;cz++){
-  addGroundChunk(cx,cz);
- }
-}
-
-const boxGeo=new THREE.BoxGeometry(1,1,1);
-const matCache=new Map();
-function getMat(color){
- if(!matCache.has(color)) matCache.set(color,new THREE.MeshLambertMaterial({color,flatShading:true}));
- return matCache.get(color);
+ for(let cz=-RENDER_DIST;cz<=RENDER_DIST;cz++) addGroundChunk(cx,cz);
 }
 
 function buildChunkMesh(cx,cz){
@@ -125,10 +102,8 @@ function buildChunkMesh(cx,cz){
  for(let x=0;x<CHUNK_SIZE;x++){
   for(let z=0;z<CHUNK_SIZE;z++){
    for(let y=0;y<WORLD_HEIGHT;y++){
-    const wx=cx*CHUNK_SIZE+x;
-    const wz=cz*CHUNK_SIZE+z;
-    const k=blockKey(wx,y,wz);
-    if(!blockMap.has(k)) continue;
+    const wx=cx*CHUNK_SIZE+x, wz=cz*CHUNK_SIZE+z;
+    const k=blockKey(wx,y,wz); if(!blockMap.has(k)) continue;
     const type=blockMap.get(k);
     const m=new THREE.Mesh(boxGeo,getMat(blockTypes[type].color));
     m.position.set(wx+0.5,y+0.5,wz+0.5);
@@ -138,167 +113,107 @@ function buildChunkMesh(cx,cz){
  }
  return meshes;
 }
-
 function rebuildChunk(cx,cz){
- const ck=chunkKey(cx,cz);
- if(chunkMeshes.has(ck)){
-  chunkMeshes.get(ck).forEach(m=>{scene.remove(m);});
- }
- const meshes=buildChunkMesh(cx,cz);
- meshes.forEach(m=>scene.add(m));
- chunkMeshes.set(ck,meshes);
+ const ck=chunkKey(cx,cz); if(chunkMeshes.has(ck)){ chunkMeshes.get(ck).forEach(m=>scene.remove(m)); }
+ const meshes=buildChunkMesh(cx,cz); meshes.forEach(m=>scene.add(m)); chunkMeshes.set(ck,meshes);
 }
-
 function loadChunksAround(px,pz){
- const {cx,cz}=getChunkCoords(px,pz);
- const toLoad=new Set();
- for(let x=cx-RENDER_DIST;x<=cx+RENDER_DIST;x++){
-  for(let z=cz-RENDER_DIST;z<=cz+RENDER_DIST;z++){
-   toLoad.add(chunkKey(x,z));
-  }
- }
- for(const ck of [...chunkMeshes.keys()]){
-  if(!toLoad.has(ck)){
-   chunkMeshes.get(ck).forEach(m=>scene.remove(m));
-   chunkMeshes.delete(ck);
-  }
- }
- for(const ck of toLoad){
-  if(!chunkMeshes.has(ck)){
-   const [cxn,czn]=ck.split(',').map(Number);
-   rebuildChunk(cxn,czn);
-  }
- }
+ const {cx,cz}=getChunkCoords(px,pz); const toLoad=new Set();
+ for(let x=cx-RENDER_DIST;x<=cx+RENDER_DIST;x++) for(let z=cz-RENDER_DIST;z<=cz+RENDER_DIST;z++) toLoad.add(chunkKey(x,z));
+ for(const ck of [...chunkMeshes.keys()]) if(!toLoad.has(ck)){ chunkMeshes.get(ck).forEach(m=>scene.remove(m)); chunkMeshes.delete(ck); }
+ for(const ck of toLoad) if(!chunkMeshes.has(ck)){ const [cxn,czn]=ck.split(',').map(Number); rebuildChunk(cxn,czn); }
 }
 
-load(50,'Setting up input...');
+// Collision helpers
+function collidesAt(x,y,z){
+ const cx=Math.floor(x), cy=Math.floor(y), cz=Math.floor(z);
+ return blockMap.has(blockKey(cx,cy,cz));
+}
+function checkPlayerCollision(px,py,pz){
+ const minX=Math.floor(px-walkHalf), maxX=Math.floor(px+walkHalf);
+ const minY=Math.floor(py-1.8), maxY=Math.floor(py+1.8);
+ const minZ=Math.floor(pz-walkHalf), maxZ=Math.floor(pz+walkHalf);
+ for(let x=minX;x<=maxX;x++) for(let y=minY;y<=maxY;y++) for(let z=minZ;z<=maxZ;z++){
+   if(blockMap.has(blockKey(x,y,z))) return true;
+ }
+ return false;
+}
 
 const player={x:0,y:35,z:0,vy:0,jumping:false};
 const keys={};
-
-document.addEventListener('keydown',e=>{
- keys[e.key.toLowerCase()]=true;
- if(e.key>='1'&&e.key<='9') selectBlock(Number(e.key)-1);
- if(e.key===' '){
-  if(!player.jumping){player.vy=0.7;player.jumping=true;}
-  e.preventDefault();
- }
-});
-document.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
-
 let yaw=0,pitch=0;
-document.addEventListener('mousemove',e=>{
- if(document.pointerLockElement===canvas){
-  yaw-=e.movementX*0.003;
-  pitch-=e.movementY*0.003;
-  pitch=Math.max(-1.4,Math.min(1.4,pitch));
- }
-});
-
-canvas.addEventListener('click',()=>{
- if(document.pointerLockElement!==canvas) canvas.requestPointerLock();
-});
-
+addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); keys[k]=true; if(e.key>='1'&&e.key<='9') selectBlock(Number(e.key)-1); if(k===' '&&!player.jumping){ player.vy=0.72; player.jumping=true; } });
+addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
+document.addEventListener('mousemove',e=>{ if(document.pointerLockElement===canvas){ yaw-=e.movementX*0.003; pitch-=e.movementY*0.003; pitch=Math.max(-1.4,Math.min(1.4,pitch)); }});
+canvas.addEventListener('click',()=>{ if(document.pointerLockElement!==canvas) canvas.requestPointerLock(); });
 canvas.addEventListener('mousedown',e=>{
  if(document.pointerLockElement!==canvas) return;
-
- const h = 1.6;
- const dir = new THREE.Vector3(Math.sin(yaw), Math.sin(pitch), Math.cos(yaw));
- 
- // Raycast through world in front of camera
- let bx=Math.round(player.x), by=Math.round(player.y+h), bz=Math.round(player.z);
- let hitBlock=null;
- let hitNormal=null;
-
- for(let i=0;i<20;i++){
-  bx = Math.round(player.x + dir.x * i * 0.5);
-  by = Math.round(player.y + h + dir.y * i * 0.5);
-  bz = Math.round(player.z + dir.z * i * 0.5);
-  const key = blockKey(bx,by,bz);
-  if(blockMap.has(key)){
-   hitBlock={x:bx,y:by,z:bz};
-   // find side normal based on previous step
-   const px = Math.round(player.x + dir.x * (i-1) * 0.5);
-   const py = Math.round(player.y + h + dir.y * (i-1) * 0.5);
-   const pz = Math.round(player.z + dir.z * (i-1) * 0.5);
-   hitNormal={x:bx-px,y:by-py,z:bz-pz};
-   break;
-  }
+ const dir=new THREE.Vector3(Math.sin(yaw),Math.sin(pitch),Math.cos(yaw)).normalize();
+ let hit=null;
+ let hitPos=null; let hitNorm=null;
+ const origin=new THREE.Vector3(player.x,player.y+1.5,player.z);
+ for(let i=1;i<=12;i++){
+   const x=Math.round(origin.x + dir.x * i * 0.6);
+   const y=Math.round(origin.y + dir.y * i * 0.6);
+   const z=Math.round(origin.z + dir.z * i * 0.6);
+   if(blockMap.has(blockKey(x,y,z))){
+     hitPos={x,y,z};
+     const px=Math.round(origin.x + dir.x * (i-1) * 0.6);
+     const py=Math.round(origin.y + dir.y * (i-1) * 0.6);
+     const pz=Math.round(origin.z + dir.z * (i-1) * 0.6);
+     hitNorm={x:x-px,y:y-py,z:z-pz};
+     hit=true; break;
+   }
  }
-
- if(hitBlock){
-  if(e.shiftKey){
-   blockMap.delete(blockKey(hitBlock.x,hitBlock.y,hitBlock.z));
-  } else {
-   const bx2 = hitBlock.x - hitNormal.x;
-   const by2 = hitBlock.y - hitNormal.y;
-   const bz2 = hitBlock.z - hitNormal.z;
-   blockMap.set(blockKey(bx2,by2,bz2),selectedBlock);
-  }
-  const {cx,cz}=getChunkCoords(hitBlock.x,hitBlock.z);
-  rebuildChunk(cx,cz);
-  return;
+ if(hit){
+   if(e.shiftKey){
+     blockMap.delete(blockKey(hitPos.x,hitPos.y,hitPos.z));
+   } else {
+     const bx=hitPos.x - hitNorm.x;
+     const by=hitPos.y - hitNorm.y;
+     const bz=hitPos.z - hitNorm.z;
+     blockMap.set(blockKey(bx,by,bz), selectedBlock);
+   }
+   const {cx,cz}=getChunkCoords(hitPos.x,hitPos.z); rebuildChunk(cx,cz);
+ } else {
+   const px=Math.round(player.x + dir.x * 3), py=Math.round(player.y + 1.5 + dir.y * 3), pz=Math.round(player.z + dir.z * 3);
+   blockMap.set(blockKey(px,py,pz),selectedBlock);
+   const {cx,cz}=getChunkCoords(px,pz); rebuildChunk(cx,cz);
  }
-
- // Fallback placement in front of camera
- const px=Math.round(player.x + dir.x * 3);
- const py=Math.round(player.y + h + dir.y * 3);
- const pz=Math.round(player.z + dir.z * 3);
- blockMap.set(blockKey(px,py,pz),selectedBlock);
- const {cx,cz}=getChunkCoords(px,pz);
- rebuildChunk(cx,cz);
 });
 
 load(70,'Rendering world...');
 loadChunksAround(0,0);
-
 load(90,'Starting game loop...');
-let lastTime=Date.now(),fps=0,frameCount=0;
-let lastChunkCx=-999,lastChunkCz=-999;
-
+let lastTime=Date.now(), fps=0, frameCount=0, lastChunkCx=-999, lastChunkCz=-999;
 function animate(){
  requestAnimationFrame(animate);
- 
- const now=Date.now();
- frameCount++;
- if(now-lastTime>1000){fps=frameCount;frameCount=0;lastTime=now;$('fps').textContent=fps;$('chunks').textContent=chunkMeshes.size;}
+ const now=Date.now(); frameCount++; if(now-lastTime>1000){fps=frameCount; frameCount=0; lastTime=now; $('fps').textContent=fps; $('chunks').textContent=chunkMeshes.size;}
 
- // Movement using camera direction + corrected axes
  const forward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
  const right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
- 
- if(keys['w']||keys['arrowup']){player.x += forward.x * 0.22; player.z += forward.z * 0.22;}
- if(keys['s']||keys['arrowdown']){player.x -= forward.x * 0.22; player.z -= forward.z * 0.22;}
- if(keys['a']||keys['arrowleft']){player.x -= right.x * 0.22; player.z -= right.z * 0.22;}
- if(keys['d']||keys['arrowright']){player.x += right.x * 0.22; player.z += right.z * 0.22;}
+ let nx=player.x, nz=player.z;
+ if(keys['w']||keys['arrowup']){ nx += forward.x * 0.18; nz += forward.z * 0.18; }
+ if(keys['s']||keys['arrowdown']){ nx -= forward.x * 0.18; nz -= forward.z * 0.18; }
+ if(keys['a']||keys['arrowleft']){ nx -= right.x * 0.18; nz -= right.z * 0.18; }
+ if(keys['d']||keys['arrowright']){ nx += right.x * 0.18; nz += right.z * 0.18; }
 
- player.vy -= 0.022;
- player.y += player.vy;
- if(player.y<4){player.y=4;player.vy=0;player.jumping=false;}
+ if(!checkPlayerCollision(nx,player.y+1.6,player.z)) player.x = nx;
+ if(!checkPlayerCollision(player.x,player.y+1.6,nz)) player.z = nz;
 
- camera.position.set(player.x,player.y+1.6,player.z);
- camera.rotation.order='YXZ';
- camera.rotation.y=yaw;
- camera.rotation.x=pitch;
+ player.vy -= 0.02; player.y += player.vy;
+ if(player.y < 4){ player.y = 4; player.vy = 0; player.jumping = false; }
+ if(checkPlayerCollision(player.x, player.y+1.6, player.z)) { player.y += 0.25; player.vy = 0; }
 
- const {cx,cz}=getChunkCoords(player.x,player.z);
- if(cx!==lastChunkCx||cz!==lastChunkCz){
-  lastChunkCx=cx;lastChunkCz=cz;
-  loadChunksAround(player.x,player.z);
- }
+ camera.position.set(player.x, player.y + 1.6, player.z);
+ camera.rotation.order='YXZ'; camera.rotation.y=yaw; camera.rotation.x=pitch;
 
+ const {cx,cz}=getChunkCoords(player.x, player.z);
+ if(cx!==lastChunkCx||cz!==lastChunkCz){ lastChunkCx=cx; lastChunkCz=cz; loadChunksAround(player.x, player.z); }
  renderer.render(scene,camera);
 }
-
-load(100,'Ready to play!');
-setTimeout(()=>$('loadingScreen').style.display='none',600);
-requestAnimationFrame(animate);
-
-window.addEventListener('resize',()=>{
- camera.aspect=innerWidth/innerHeight;
- camera.updateProjectionMatrix();
- renderer.setSize(innerWidth,innerHeight);
-});
+load(100,'Ready to play!'); setTimeout(()=>$('loadingScreen').style.display='none',600); requestAnimationFrame(animate);
+window.addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
 </script>
 </body>
 </html>
